@@ -39,11 +39,12 @@ type
 
   AllowedWasmType* = WasmTypes or void or WasmTuple
 
-
-
 proc checkWasmRes*(res: Result) {.inline.} =
   if res != nil:
     raise newException(WasmError, $res)
+
+proc suppressLookupFailure*(res: Result) {.inline.} =
+  discard
 
 proc `=destroy`(we: var typeof(WasmEnv()[])) =
   m3FreeRuntime(we.runtime)
@@ -74,7 +75,7 @@ proc loadWasmEnv*(
   when defined wasm3HasWasi: # Maybe an if statement?
     checkWasmRes m3LinkWasi(result.modules[0])
   for hostProc in hostProcs:
-    checkWasmRes m3LinkRawFunction(result.modules[0], cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
+    suppressLookupFailure m3LinkRawFunction(result.modules[0], cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
   checkWasmRes m3_CompileModule(result.modules[0])
 
   if loadAlloc:
@@ -108,7 +109,7 @@ proc loadWasmEnv*(
   for hostProc in hostProcs:
     for module in result.modules:
       if hostProc.module == "*" or  module.m3GetModuleName == cstring hostProc.module:
-        checkWasmRes m3LinkRawFunction(module, cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
+        suppressLookupFailure m3LinkRawFunction(module, cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
 
   for module in result.modules:
     checkWasmRes m3_CompileModule(module)
