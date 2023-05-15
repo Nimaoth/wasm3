@@ -57,8 +57,11 @@ proc loadWasmEnv*(
   wasmData: sink string,
   stackSize: uint32 = high(uint16),
   hostProcs: openarray[WasmHostProc] = [],
-  loadAlloc = false
+  loadAlloc = false,
+  allocName = wasm3AllocName,
+  deallocName = wasm3DeallocName,
   ): WasmEnv =
+
   new result
   result.wasmData = @[wasmData]
   result.env = m3_NewEnvironment()
@@ -79,15 +82,18 @@ proc loadWasmEnv*(
   checkWasmRes m3_CompileModule(result.modules[0])
 
   if loadAlloc:
-    result.allocFunc = result.findFunction(wasm3AllocName, [I32], [I32])
-    result.deallocFunc = result.findFunction(wasm3DeallocName, [I32], [])
+    result.allocFunc = result.findFunction(allocName, [I32], [I32])
+    result.deallocFunc = result.findFunction(deallocName, [I32], [])
 
 proc loadWasmEnv*(
   wasmData: sink openarray[string],
   stackSize: uint32 = high(uint16),
   hostProcs: openarray[WasmHostProc] = [],
-  loadAlloc = false
+  loadAlloc = false,
+  allocName = wasm3AllocName,
+  deallocName = wasm3DeallocName,
   ): WasmEnv =
+
   new result
   result.env = m3_NewEnvironment()
   result.runtime = result.env.m3_NewRuntime(stackSize, nil)
@@ -115,8 +121,8 @@ proc loadWasmEnv*(
     checkWasmRes m3_CompileModule(module)
 
   if loadAlloc:
-    result.allocFunc = result.findFunction("alloc", [I32], [I32])
-    result.deallocFunc = result.findFunction("dealloc", [I32], [])
+    result.allocFunc = result.findFunction(allocName, [I32], [I32])
+    result.deallocFunc = result.findFunction(deallocName, [I32], [])
 
 proc ptrArrayTo*(t: var WasmTypes): array[1, pointer] = [pointer(addr t)]
 
@@ -238,6 +244,37 @@ proc getFromMem*(wasmEnv: WasmEnv, T: typedesc, pos: uint32, offset: uint64 = 0)
   if pos + uint32(sizeof(T)) + uint32(offset) > sizeOfMem:
     raise newException(WasmError, "Attempted to read outside of memory bounds")
   copyMem(result.addr, cast[pointer](cast[uint64](thePtr) + uint64(pos) + offset), sizeof(T))
+
+proc toRawPtr*(wasmEnv: WasmEnv, pos: WasmPtr, T: typedesc): ptr T =
+  var sizeOfMem: uint32
+  let thePtr = m3GetMemory(wasmEnv.runtime, addr sizeOfMem, 0)
+  if pos.uint32 >= sizeOfMem:
+    raise newException(WasmError, "Attempted to read outside of memory bounds")
+  return cast[ptr T](cast[uint64](thePtr) + uint64(pos))
+
+proc toRawPtr*(wasmEnv: WasmEnv, pos: WasmPtr): pointer =
+  var sizeOfMem: uint32
+  let thePtr = m3GetMemory(wasmEnv.runtime, addr sizeOfMem, 0)
+  if pos.uint32 >= sizeOfMem:
+    raise newException(WasmError, "Attempted to read outside of memory bounds")
+  return cast[pointer](cast[uint64](thePtr) + uint64(pos))
+
+proc find*[T](wasmEnv: WasmEnv, pos: WasmPtr, value: T): WasmPtr =
+  var sizeOfMem: uint32
+  let thePtr = m3GetMemory(wasmEnv.runtime, addr sizeOfMem, 0)
+  result = pos
+  var pos = pos.uint32
+  while pos + uint32(sizeof(T)) - 1 < sizeOfMem:
+    if cast[ptr T](cast[uint64](thePtr) + uint64(pos))[] == value:
+      return pos.WasmPtr
+    pos += uint32(sizeof(T))
+  return 0.WasmPtr
+
+proc getString*(wasmEnv: WasmEnv, pos: WasmPtr): cstring =
+  let posEnd = wasm3.find(wasmEnv, pos, 0.uint8)
+  let len = posEnd.uint32 - pos.uint32
+
+  return cast[cstring](wasmEnv.toRawPtr(pos))
 
 proc setMem*[T](wasmEnv: WasmEnv, val: T, pos: uint32, offset: uint64 = 0) =
   mixin wasmSize
