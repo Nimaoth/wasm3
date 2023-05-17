@@ -64,6 +64,15 @@ proc fromWasm*[T: SomeNumeric](result: var T, stackPtr: var uint64, mem: pointer
   result = cast[ptr T](stackPtr)[]
   stackPtr += uint64 sizeof(pointer)
 
+proc fromWasm*[T: WasmPtr](result: var T, memStart: pointer, offset: int) =
+  # Numeric heap deserialisation
+  copyMem(result.addr, cast[pointer](cast[uint64](memStart) + uint64(offset)), sizeof(result))
+
+proc fromWasm*[T: WasmPtr](result: var T, stackPtr: var uint64, mem: pointer) =
+  # Numeric stack deserialisation
+  result = cast[ptr T](stackPtr)[]
+  stackPtr += uint64 sizeof(pointer)
+
 proc fromWasm*[T: WasmHeapDeserialisable](result: var openArray[T], stackPtr: var uint64, mem: pointer) =
   mixin wasmSize, fromWasm
   var ind: uint32

@@ -53,6 +53,9 @@ proc `=destroy`(we: var typeof(WasmEnv()[])) =
 
 proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[ValueKind]): PFunction
 
+proc getUserData*(wasmEnv: WasmEnv): pointer =
+  return m3_GetUserData(wasmEnv.runtime)
+
 proc loadWasmEnv*(
   wasmData: sink string,
   stackSize: uint32 = high(uint16),
@@ -60,12 +63,13 @@ proc loadWasmEnv*(
   loadAlloc = false,
   allocName = wasm3AllocName,
   deallocName = wasm3DeallocName,
+  userdata: pointer,
   ): WasmEnv =
 
   new result
   result.wasmData = @[wasmData]
   result.env = m3_NewEnvironment()
-  result.runtime = result.env.m3_NewRuntime(stackSize, nil)
+  result.runtime = result.env.m3_NewRuntime(stackSize, userdata)
 
   result.modules.add default(PModule)
   checkWasmRes m3_ParseModule(result.env, result.modules[0].addr, cast[ptr uint8](result.wasmData[0][0].addr), uint32 result.wasmData[0].len)
@@ -92,11 +96,12 @@ proc loadWasmEnv*(
   loadAlloc = false,
   allocName = wasm3AllocName,
   deallocName = wasm3DeallocName,
+  userdata: pointer,
   ): WasmEnv =
 
   new result
   result.env = m3_NewEnvironment()
-  result.runtime = result.env.m3_NewRuntime(stackSize, nil)
+  result.runtime = result.env.m3_NewRuntime(stackSize, userdata)
   result.wasmData.setLen(wasmData.len)
   result.modules.setLen(wasmData.len)
   for i, data in enumerate result.wasmData.mitems:
@@ -184,7 +189,7 @@ macro callHost*(p: proc, stackPointer: var uint64, mem: pointer): untyped =
         arg
   result =
     if hasReturnType:
-      genast(retT, call, stackPointer):
+      genast(retT, mem, call, stackPointer):
         let retType = block:
           var val: ptr retT
           val.fromWasm(stackPointer, mem)
@@ -205,6 +210,18 @@ template toWasmHostProc*(p: static proc, modul, nam, ty: string): WasmHostProc =
       var sp = sp.stackPtrToUint()
       callHost(p, sp, mem)
     )
+
+macro toWasmHostProcTemplate*(procedureTemplate: typed, modul, nam, ty: string): WasmHostProc =
+  result = genAst(procedureTemplate, modul, nam, ty):
+    WasmHostProc(
+      module: modul,
+      name: nam,
+      typ: ty,
+      prc: proc (runtime: PRuntime; ctx: PImportContext; sp: ptr uint64; mem: pointer): pointer {.cdecl.} =
+        procedureTemplate(runtime, procedure)
+        var sp = sp.stackPtrToUint()
+        callHost(procedure, sp, mem)
+      )
 
 proc isType*(fnc: PFunction, args, results: openArray[ValueKind]): bool =
   # Returns whether a wasm module's function matches the type signature supplied.
