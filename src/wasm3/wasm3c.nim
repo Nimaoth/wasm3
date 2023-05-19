@@ -10,6 +10,18 @@ when defined(wasm3HasWasi):
   {.compile: wasmDir / "m3_api_uvwasi.c".}
   {.compile: wasmDir / "m3_api_meta_wasi.c".}
 
+when defined(wasm3RecordBacktraces):
+  {.passC: "-D" & "d_m3RecordBacktraces=1".}
+
+when defined(wasm3EnableStrace1):
+  {.passC: "-D" & "d_m3EnableStrace=1".}
+
+when defined(wasm3EnableStrace2):
+  {.passC: "-D" & "d_m3EnableStrace=2".}
+
+when defined(wasm3EnableStrace3):
+  {.passC: "-D" & "d_m3EnableStrace=3".}
+
 when defined(wasm3VerboseErrorMessages):
   {.passC: "-D" & "DEBUG".}
   {.passC: "-D" & "d_m3VerboseErrorMessages=1".}
@@ -104,12 +116,12 @@ type
     line*: uint32
     message*: cstring
 
-  BackTraceFrame* {.bycopy.} = object
+  M3BacktraceFrame* {.bycopy.} = object
     moduleOffset*: uint32
     function*: PFunction
-    next*: ptr BackTraceFrame
+    next*: ptr M3BacktraceFrame
 
-  PBackTraceFrame* = ptr BacktraceFrame
+  PBackTraceFrame* = ptr M3BacktraceFrame
   M3BacktraceInfo* {.bycopy.} = object
     frames*: PBackTraceFrame
     lastFrame*: PBackTraceFrame

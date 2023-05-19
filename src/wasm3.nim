@@ -3,6 +3,7 @@ import wasm3/[wasm3c]
 import std/[macros, genasts, typetraits, enumerate, tables, strformat]
 import micros
 
+export wasm3c
 
 const
   wasm3AllocName {.strdefine.} = "alloc"
@@ -39,8 +40,30 @@ type
 
   AllowedWasmType* = WasmTypes or void or WasmTuple
 
+var currentRuntime: PRuntime = nil
+
+proc printStackTrace*(runtime: PRuntime) =
+  let backtrace = m3_GetBacktrace(runtime)
+  if backtrace.isNil:
+    return
+  echo "Wasm Stacktrace:"
+  var temp = backtrace.frames
+  while not temp.isNil:
+    let module = m3_GetFunctionModule(temp.function)
+    let name = m3_GetFunctionName(temp.function)
+    echo m3_GetModuleName(module), ".", name
+    temp = temp.next
+
+proc m3PrintStackTrace*(runtime: PRuntime) {.exportc.} =
+  let runtime = if runtime.isNil: currentRuntime else: runtime
+  if runtime.isNil:
+    return
+  printStackTrace(runtime)
+
 proc checkWasmRes*(res: Result) {.inline.} =
   if res != nil:
+    if not currentRuntime.isNil:
+      currentRuntime.printStackTrace()
     raise newException(WasmError, $res)
 
 proc suppressLookupFailure*(res: Result) {.inline.} =
@@ -107,20 +130,20 @@ proc loadWasmEnv*(
   for i, data in enumerate result.wasmData.mitems:
     data = move wasmData[i]
 
-    checkWasmRes m3_ParseModule(result.env, result.modules[^1].addr, cast[ptr uint8](result.wasmData[^1][0].addr), uint32 result.wasmData[^1].len)
+    checkWasmRes m3_ParseModule(result.env, result.modules[i].addr, cast[ptr uint8](result.wasmData[i][0].addr), uint32 result.wasmData[i].len)
     try:
-      checkWasmRes m3_LoadModule(result.runtime, result.modules[^1])
+      checkWasmRes m3_LoadModule(result.runtime, result.modules[i])
     except WasmError:
-      m3FreeModule(result.modules[^1])
+      m3FreeModule(result.modules[i])
       raise
 
-    when defined wasm3HasWasi: # Maybe an if statement?
-      checkWasmRes m3LinkWasi(result.modules[^1])
+  when defined wasm3HasWasi: # Maybe an if statement?
+    for module in result.modules:
+      checkWasmRes m3LinkWasi(module)
 
   for hostProc in hostProcs:
     for module in result.modules:
-      if hostProc.module == "*" or  module.m3GetModuleName == cstring hostProc.module:
-        suppressLookupFailure m3LinkRawFunction(module, cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
+      suppressLookupFailure m3LinkRawFunction(module, cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
 
   for module in result.modules:
     checkWasmRes m3_CompileModule(module)
@@ -162,12 +185,14 @@ macro call*(theFunc: PFunction, returnType: typedesc[WasmTuple or WasmTypes or v
     result.add:
       genast(returnType, theFunc, arrVals, callProc = bindsym"m3_Call"):
         var arrVal = arrVals
+        currentRuntime = theFunc.m3_GetFunctionModule().m3_GetModuleRuntime()
         checkWasmRes callProc(theFunc, uint32 len arrVal, cast[ptr pointer](arrVal.addr))
         getResult[returnType](theFunc)
   else:
     result.add:
         genast(returnType, theFunc, callProc = bindsym"m3_Call"):
           checkWasmRes callProc(theFunc, 0, nil)
+          currentRuntime = theFunc.m3_GetFunctionModule.m3_GetModuleRuntime
           getResult[returnType](theFunc)
 
 macro callHost*(p: proc, stackPointer: var uint64, mem: pointer): untyped =
@@ -218,6 +243,7 @@ macro toWasmHostProcTemplate*(procedureTemplate: typed, modul, nam, ty: string):
       name: nam,
       typ: ty,
       prc: proc (runtime: PRuntime; ctx: PImportContext; sp: ptr uint64; mem: pointer): pointer {.cdecl.} =
+        currentRuntime = runtime
         procedureTemplate(runtime, procedure)
         var sp = sp.stackPtrToUint()
         callHost(procedure, sp, mem)
