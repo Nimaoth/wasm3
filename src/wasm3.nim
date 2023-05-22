@@ -16,7 +16,7 @@ type
     env: PEnv
     runtime: PRuntime
     modules: seq[PModule]
-    wasmData: seq[string] # have to keep data alive
+    wasmData: seq[seq[uint8]] # have to keep data alive
     allocFunc, deallocFunc: PFunction
 
   WasmHostProc* = object
@@ -79,6 +79,44 @@ proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[Valu
 proc getUserData*(wasmEnv: WasmEnv): pointer =
   return m3_GetUserData(wasmEnv.runtime)
 
+proc toByteArray(a: sink string): seq[uint8] =
+  result.setLen(a.len)
+  for i in 0..high(a):
+    result[i] = a[i].uint8
+
+proc loadWasmEnv*(
+  wasmData: openArray[uint8],
+  stackSize: uint32 = high(uint16),
+  hostProcs: openarray[WasmHostProc] = [],
+  loadAlloc = false,
+  allocName = wasm3AllocName,
+  deallocName = wasm3DeallocName,
+  userdata: pointer,
+  ): WasmEnv =
+
+  new result
+  result.wasmData = @[@wasmData]
+  result.env = m3_NewEnvironment()
+  result.runtime = result.env.m3_NewRuntime(stackSize, userdata)
+
+  result.modules.add default(PModule)
+  checkWasmRes m3_ParseModule(result.env, result.modules[0].addr, result.wasmData[0][0].addr, uint32 result.wasmData[0].len)
+  try:
+    checkWasmRes m3_LoadModule(result.runtime, result.modules[0])
+  except WasmError:
+    m3FreeModule(result.modules[0])
+    raise
+
+  when defined wasm3HasWasi: # Maybe an if statement?
+    checkWasmRes m3LinkWasi(result.modules[0])
+  for hostProc in hostProcs:
+    suppressLookupFailure m3LinkRawFunction(result.modules[0], cstring hostProc.module, cstring hostProc.name, cstring hostProc.typ, hostProc.prc)
+  checkWasmRes m3_CompileModule(result.modules[0])
+
+  if loadAlloc:
+    result.allocFunc = result.findFunction(allocName, [I32], [I32])
+    result.deallocFunc = result.findFunction(deallocName, [I32], [])
+
 proc loadWasmEnv*(
   wasmData: sink string,
   stackSize: uint32 = high(uint16),
@@ -90,12 +128,12 @@ proc loadWasmEnv*(
   ): WasmEnv =
 
   new result
-  result.wasmData = @[wasmData]
+  result.wasmData = @[wasmData.toByteArray]
   result.env = m3_NewEnvironment()
   result.runtime = result.env.m3_NewRuntime(stackSize, userdata)
 
   result.modules.add default(PModule)
-  checkWasmRes m3_ParseModule(result.env, result.modules[0].addr, cast[ptr uint8](result.wasmData[0][0].addr), uint32 result.wasmData[0].len)
+  checkWasmRes m3_ParseModule(result.env, result.modules[0].addr, result.wasmData[0][0].addr, uint32 result.wasmData[0].len)
   try:
     checkWasmRes m3_LoadModule(result.runtime, result.modules[0])
   except WasmError:
@@ -128,7 +166,7 @@ proc loadWasmEnv*(
   result.wasmData.setLen(wasmData.len)
   result.modules.setLen(wasmData.len)
   for i, data in enumerate result.wasmData.mitems:
-    data = move wasmData[i]
+    data = wasmData[i].toByteArray
 
     checkWasmRes m3_ParseModule(result.env, result.modules[i].addr, cast[ptr uint8](result.wasmData[i][0].addr), uint32 result.wasmData[i].len)
     try:
@@ -181,18 +219,19 @@ macro call*(theFunc: PFunction, returnType: typedesc[WasmTuple or WasmTypes or v
     arrVals.add:
       genAst(argName):
         pointer(addr argName)
+
   if args.len > 0:
     result.add:
-      genast(returnType, theFunc, arrVals, callProc = bindsym"m3_Call"):
+      genast(returnType, theFunc, arrVals, callProc = bindsym"m3_Call", m3_GetFunctionModule = bindsym"m3_GetFunctionModule", m3_GetModuleRuntime = bindsym"m3_GetModuleRuntime"):
         var arrVal = arrVals
-        currentRuntime = theFunc.m3_GetFunctionModule().m3_GetModuleRuntime()
+        currentRuntime = m3_GetModuleRuntime(m3_GetFunctionModule(theFunc))
         checkWasmRes callProc(theFunc, uint32 len arrVal, cast[ptr pointer](arrVal.addr))
         getResult[returnType](theFunc)
   else:
     result.add:
-        genast(returnType, theFunc, callProc = bindsym"m3_Call"):
+        genast(returnType, theFunc, callProc = bindsym"m3_Call", m3_GetFunctionModule = bindsym"m3_GetFunctionModule", m3_GetModuleRuntime = bindsym"m3_GetModuleRuntime"):
           checkWasmRes callProc(theFunc, 0, nil)
-          currentRuntime = theFunc.m3_GetFunctionModule.m3_GetModuleRuntime
+          currentRuntime = m3_GetModuleRuntime(m3_GetFunctionModule(theFunc))
           getResult[returnType](theFunc)
 
 macro callHost*(p: proc, stackPointer: var uint64, mem: pointer): untyped =
@@ -232,7 +271,7 @@ template toWasmHostProc*(p: static proc, modul, nam, ty: string): WasmHostProc =
     name: nam,
     typ: ty,
     prc: proc (runtime: PRuntime; ctx: PImportContext; sp: ptr uint64; mem: pointer): pointer {.cdecl.} =
-      var sp = sp.stackPtrToUint()
+      var sp = stackPtrToUint(sp)
       callHost(p, sp, mem)
     )
 
@@ -245,7 +284,7 @@ macro toWasmHostProcTemplate*(procedureTemplate: typed, modul, nam, ty: string):
       prc: proc (runtime: PRuntime; ctx: PImportContext; sp: ptr uint64; mem: pointer): pointer {.cdecl.} =
         currentRuntime = runtime
         procedureTemplate(runtime, procedure)
-        var sp = sp.stackPtrToUint()
+        var sp = stackPtrToUint(sp)
         callHost(procedure, sp, mem)
       )
 
