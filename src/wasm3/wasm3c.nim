@@ -1,14 +1,28 @@
-import std/os
+import std/[os, strutils, strformat]
 
-const wasmDir = currentSourcePath().parentDir() / "/wasm3c/source/"
+proc norm(path: string): string = path.replace("\\", "/")
+proc `//`(path: string, ext: string): string = norm(path / ext)
+
+const parentDir = currentSourcePath().parentDir().norm()
+const wasmDir = parentDir // "/wasm3c/source/"
+
 {.passC: "-I" & wasmDir.}
+
+# ugly, but needed because wasm3 includes Windows.h with uppercase W,
+# but mingw uses windows.h (lowercase w)
+# Also for some reason the mingw headers aren't in the include path by default
+when defined(crossCompileToWindows):
+  const shimDir = parentDir // "/windows_header_shims"
+  echo fmt"[wasm3c.nim] Adding header shims at {shimDir} and mingw headers at /usr/share/mingw-w64/include"
+  {.passC: "-I" & shimDir.}
+  {.passC: "-I/usr/share/mingw-w64/include".}
 
 when defined(wasm3HasWasi):
   {.passC: "-D" & "d_m3HasWASI".}
-  {.compile: wasmDir / "m3_api_libc.c".}
-  {.compile: wasmDir / "m3_api_wasi.c".}
-  {.compile: wasmDir / "m3_api_uvwasi.c".}
-  {.compile: wasmDir / "m3_api_meta_wasi.c".}
+  {.compile: wasmDir // "m3_api_libc.c".}
+  {.compile: wasmDir // "m3_api_wasi.c".}
+  {.compile: wasmDir // "m3_api_uvwasi.c".}
+  {.compile: wasmDir // "m3_api_meta_wasi.c".}
 
 when defined(wasm3RecordBacktraces):
   {.passC: "-D" & "d_m3RecordBacktraces=1".}
@@ -58,17 +72,17 @@ when defined(wasm3LogNativeStack):
   {.passC: "-D" & "DEBUG".}
   {.passC: "-D" & "d_m3LogNativeStack=1".}
 
-{.compile: wasmDir / "m3_api_tracer.c".}
-{.compile: wasmDir / "m3_bind.c".}
-{.compile: wasmDir / "m3_code.c".}
-{.compile: wasmDir / "m3_compile.c".}
-{.compile: wasmDir / "m3_core.c".}
-{.compile: wasmDir / "m3_env.c".}
-{.compile: wasmDir / "m3_exec.c".}
-{.compile: wasmDir / "m3_function.c".}
-{.compile: wasmDir / "m3_info.c".}
-{.compile: wasmDir / "m3_module.c".}
-{.compile: wasmDir / "m3_parse.c".}
+{.compile: wasmDir // "m3_api_tracer.c".}
+{.compile: wasmDir // "m3_bind.c".}
+{.compile: wasmDir // "m3_code.c".}
+{.compile: wasmDir // "m3_compile.c".}
+{.compile: wasmDir // "m3_core.c".}
+{.compile: wasmDir // "m3_env.c".}
+{.compile: wasmDir // "m3_exec.c".}
+{.compile: wasmDir // "m3_function.c".}
+{.compile: wasmDir // "m3_info.c".}
+{.compile: wasmDir // "m3_module.c".}
+{.compile: wasmDir // "m3_parse.c".}
 
 type
   ValueKind* = enum
