@@ -13,7 +13,10 @@ const wasmDir = parentDir // "/wasm3c/source/"
 # Also for some reason the mingw headers aren't in the include path by default
 when defined(crossCompileToWindows):
   const shimDir = parentDir // "/windows_header_shims"
-  echo fmt"[wasm3c.nim] Adding header shims at {shimDir} and mingw headers at /usr/share/mingw-w64/include"
+
+  static:
+    echo fmt"[wasm3c.nim] Adding header shims at {shimDir} and mingw headers at /usr/share/mingw-w64/include"
+
   {.passC: "-I" & shimDir.}
   {.passC: "-I/usr/share/mingw-w64/include".}
 

@@ -8,6 +8,9 @@ export wasm3c
 const
   wasm3AllocName {.strdefine.} = "alloc"
   wasm3DeallocName {.strdefine.} = "dealloc"
+  wasm3StackAllocName {.strdefine.} = "stackAlloc"
+  wasm3StackSaveName {.strdefine.} = "stackSave"
+  wasm3StackRestoreName {.strdefine.} = "stackRestore"
 
 type
   WasmError* = object of CatchableError
@@ -17,7 +20,7 @@ type
     runtime: PRuntime
     modules: seq[PModule]
     wasmData: seq[seq[uint8]] # have to keep data alive
-    allocFunc, deallocFunc: PFunction
+    allocFunc, deallocFunc, stackAllocFunc, stackSaveFunc, stackRestoreFunc: PFunction
 
   WasmHostProc* = object
     module, name, typ: string
@@ -25,7 +28,6 @@ type
 
 import wasm3/wasmconversions
 export wasmconversions
-
 
 proc wasmValidTuple*(t: typedesc[tuple]): bool =
   result = true
@@ -116,6 +118,9 @@ proc loadWasmEnv*(
   if loadAlloc:
     result.allocFunc = result.findFunction(allocName, [I32], [I32])
     result.deallocFunc = result.findFunction(deallocName, [I32], [])
+    result.stackAllocFunc = result.findFunction(wasm3StackAllocName, [I32], [I32])
+    result.stackSaveFunc = result.findFunction(wasm3StackSaveName, [], [I32])
+    result.stackRestoreFunc = result.findFunction(wasm3StackRestoreName, [I32], [])
 
 proc loadWasmEnv*(
   wasmData: sink string,
@@ -149,6 +154,9 @@ proc loadWasmEnv*(
   if loadAlloc:
     result.allocFunc = result.findFunction(allocName, [I32], [I32])
     result.deallocFunc = result.findFunction(deallocName, [I32], [])
+    result.stackAllocFunc = result.findFunction(wasm3StackAllocName, [I32], [I32])
+    result.stackSaveFunc = result.findFunction(wasm3StackSaveName, [], [I32])
+    result.stackRestoreFunc = result.findFunction(wasm3StackRestoreName, [I32], [])
 
 proc loadWasmEnv*(
   wasmData: sink openarray[string],
@@ -189,6 +197,9 @@ proc loadWasmEnv*(
   if loadAlloc:
     result.allocFunc = result.findFunction(allocName, [I32], [I32])
     result.deallocFunc = result.findFunction(deallocName, [I32], [])
+    result.stackAllocFunc = result.findFunction(wasm3StackAllocName, [I32], [I32])
+    result.stackSaveFunc = result.findFunction(wasm3StackSaveName, [], [I32])
+    result.stackRestoreFunc = result.findFunction(wasm3StackRestoreName, [I32], [])
 
 proc ptrArrayTo*(t: var WasmTypes): array[1, pointer] = [pointer(addr t)]
 
@@ -387,7 +398,6 @@ proc copyTo*[T: WasmAllocatable](wasmEnv: WasmEnv, data: T): WasmPtr =
   let dest = wasmEnv.env.m3GetMemory(memSize.addr, uint32 result)
   data.wasmCopyTo(dest)
 
-
 proc alloc*(env: WasmEnv, size: uint32): WasmPtr =
   if env.allocFunc.isNil:
     raise newException(WasmError, fmt"Environment's '{wasm3AllocName}' procedure is 'nil'")
@@ -397,6 +407,21 @@ proc dealloc*(env: WasmEnv, thePtr: WasmPtr) =
   if env.deallocFunc.isNil:
     raise newException(WasmError, fmt"Environment's '{wasm3DeallocName}' procedure is 'nil'")
   env.deallocFunc.call(void, thePtr)
+
+proc stackAlloc*(env: WasmEnv, size: uint32): WasmPtr =
+  if env.stackAllocFunc.isNil:
+    raise newException(WasmError, fmt"Environment's 'stackAlloc' procedure is 'nil'")
+  env.stackAllocFunc.call(WasmPtr, size)
+
+proc stackSave*(env: WasmEnv): WasmPtr =
+  if env.stackSaveFunc.isNil:
+    raise newException(WasmError, fmt"Environment's 'stackSave' procedure is 'nil'")
+  env.stackSaveFunc.call(WasmPtr)
+
+proc stackRestore*(env: WasmEnv, p: WasmPtr) =
+  if env.stackRestoreFunc.isNil:
+    raise newException(WasmError, fmt"Environment's 'stackRestore' procedure is 'nil'")
+  env.stackRestoreFunc.call(void, p)
 
 proc alloc*[T: WasmAllocatable](env: WasmEnv, allocatable: T): WasmPtr =
   mixin wasmAlloc
