@@ -76,7 +76,7 @@ proc `=destroy`(we: var typeof(WasmEnv()[])) =
   m3FreeEnvironment(we.env)
   `=destroy`(we.wasmData)
 
-proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[ValueKind]): PFunction
+proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[ValueKind]): PFunction {.gcsafe.}
 
 proc getUserData*(wasmEnv: WasmEnv): pointer =
   return m3_GetUserData(wasmEnv.runtime)
@@ -94,7 +94,7 @@ proc loadWasmEnv*(
   allocName = wasm3AllocName,
   deallocName = wasm3DeallocName,
   userdata: pointer,
-  ): WasmEnv =
+  ): WasmEnv {.gcsafe.} =
 
   new result
   result.wasmData = @[@wasmData]
@@ -130,7 +130,7 @@ proc loadWasmEnv*(
   allocName = wasm3AllocName,
   deallocName = wasm3DeallocName,
   userdata: pointer,
-  ): WasmEnv =
+  ): WasmEnv {.gcsafe.} =
 
   new result
   result.wasmData = @[wasmData.toByteArray]
@@ -314,7 +314,7 @@ proc isType*(fnc: PFunction, args, results: openArray[ValueKind]): bool =
 proc findFunction*(wasmEnv: WasmEnv, name: string): PFunction =
   checkWasmRes m3FindFunction(result.addr, wasmEnv.runtime, cstring name)
 
-proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[ValueKind]): PFunction =
+proc findFunction*(wasmEnv: WasmEnv, name: string, args, results: openarray[ValueKind]): PFunction {.gcsafe.} =
   result = wasmEnv.findFunction(name)
   if not result.isType(args, results):
     {.warning: "Insert rendered proc here".}
