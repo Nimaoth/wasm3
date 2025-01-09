@@ -7,6 +7,8 @@ const parentDir = currentSourcePath().parentDir().norm()
 const wasmDir = parentDir // "/wasm3c/source/"
 
 {.passC: "-I" & wasmDir.}
+when defined(clang) and defined(windows):
+  {.passC: "-D" & "M3_DISABLE_VECTORCALL".}
 
 # ugly, but needed because wasm3 includes Windows.h with uppercase W,
 # but mingw uses windows.h (lowercase w)
